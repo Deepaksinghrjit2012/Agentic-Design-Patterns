@@ -1,3 +1,31 @@
+"""
+Visual flow:
+
+  User request
+       |
+       v
+  cordinator_router_chain
+       |
+       v
+  decision = booking / information / unclear
+       |
+       v
+  delegation_branch (RunnableBranch)
+     /       |        \
+    v        v         v
+ booking   information  unclear
+    |          |           |
+    v          v           v
+ booking_   info_      unclear_
+ handler    handler     handler
+    \          |           /
+     \         |          /
+      +--------+---------+
+               |
+               v
+            final output
+"""
+
 import os
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
@@ -39,6 +67,7 @@ branches={
     "information":RunnablePassthrough.assign(output=lambda x: info_handler(x['request']['request'])),
     "unclear":RunnablePassthrough.assign(output=lambda x: unclear_handler(x['request']['request'])),
 }
+
 delegation_branch=RunnableBranch(
     (lambda x: x['decision'].strip()== "booking", branches["booking"]),
     (lambda x: x['decision'].strip()== "information", branches["information"]),
@@ -47,6 +76,7 @@ delegation_branch=RunnableBranch(
 )
 coordinator_agent={
     "decision":cordinator_router_chain,
+    # Preserve the original input so the selected branch can still read it later.
     "request":RunnablePassthrough()
 } | delegation_branch | (lambda x: x['output'])
 def main():
