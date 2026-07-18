@@ -1,94 +1,69 @@
+import io
 import os
-import asyncio
-import json
 from dotenv import load_dotenv
-from google.adk.agents import Agent
-from google.adk.runners import InMemoryRunner
-from google.adk.tools import FunctionTool
-from google.genai import types
-
+from langchain_core.runnables import RunnablePassthrough , RunnableParallel,Runnable
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
+import asyncio
 load_dotenv()
 
-def extract_specification(input_text:str)->str:
-    """Extracts specifications from the given input text."""
-    # Simulate extraction logic
-    return f"Extracted specifications from the input text: {input_text}"
-def convert_to_json(specification:str)->str:
-    """Converts the given specification text to JSON format."""
-    # Simulate JSON conversion with a real structured payload.
-    normalized = specification.lower()
-    payload = {
-        "RAM": "6GB" if "6gb" in normalized else None,
-        "Model": "iPhone 14 Pro" if "iphone 14 pro" in normalized else None,
-        "Storage": "128GB to 1TB" if "128gb" in normalized or "1tb" in normalized else None,
+llm=ChatGoogleGenerativeAI(
+    model=os.getenv("Deployment_Model"),
+    google_api_key=os.getenv("GOOGLE_API_KEY"),
+    temperature=0,
+)
+
+question_chain:Runnable=(
+    ChatPromptTemplate.from_messages(
+    [
+        ("system","you are an assistant make question the topic given below"),
+        ("user","{topic}")
+    ]
+    )
+    |llm
+    |StrOutputParser()
+)
+
+summerization_chain:Runnable=(
+    ChatPromptTemplate.from_messages(
+        [
+            ("system","you are an summerization agent who crete a summery on the given topic below"),
+            ("user","{topic}")
+
+        ]
+    )
+    |llm
+    |StrOutputParser()
+
+)
+
+map_prompt=RunnableParallel(
+    {
+        "summary":summerization_chain,
+        "questions":question_chain,
+        "topic":RunnablePassthrough()
     }
-    return json.dumps(payload, indent=2)
-
-
-extraction_tool=FunctionTool(extract_specification)
-JsonTool=FunctionTool(convert_to_json)
-
-ExtractionAgent=Agent(
-    name="extraction_agent",
-    model="gemini-2.5-flash",
-    instruction=(
-        "You are an extraction agent. Extract the specification details from the given text "
-        "and return only the extracted specification summary."
-    ),
-    description="This agent is to extract specification details from plain text",
-    tools=[extraction_tool],
-)
-JsonAgent=Agent(
-    name="Json_convertor_Agnet",
-    model="gemini-2.5-flash",
-    instruction=(
-        "You are a JSON conversion agent. Take the extracted specification text and convert it "
-        "into JSON with exactly these keys: RAM, Model, Storage. Return only valid JSON."
-    ),
-    description="This agent is to convert specification into json output",
-    tools=[JsonTool],
-    output_schema={
-        "type": "object",
-        "properties": {
-            "RAM": {"type": ["string", "null"]},
-            "Model": {"type": ["string", "null"]},
-            "Storage": {"type": ["string", "null"]},
-        },
-    },
 )
 
-RouterAgent=Agent(
-    name="Orchestrator_Agent",
-    model="gemini-2.5-flash",
-    instruction=(
-        "You are an orchestrator agent. First transfer the request to extraction_agent. "
-        "After extraction_agent returns the extracted specification, transfer that result to "
-        "Json_convertor_Agnet so the final response is valid JSON."
-    ),
-    description="Orchestrator Agent that will decide which agent to call",
-    sub_agents=[JsonAgent,ExtractionAgent],
+systhasyzed_prmpt=ChatPromptTemplate.from_messages(
+    [
+        ("system","""Based on the followinf information:
+         Summary:{summary}
+         Related Questions:{questions}
+         Synthesize a comprehensive answer."""),
+         ("user","Origina topic:{topic}")
+    ]
 )
 
+full_parallel_chain=map_prompt|systhasyzed_prmpt|llm|StrOutputParser()
 
-agent_runner=InMemoryRunner(RouterAgent)
+async def run_parallel(topic:str)->None:
+    responce= await full_parallel_chain.ainvoke(topic)
+    print(responce)
 
-if __name__ =="__main__":
-    asyncio.run(
-        agent_runner.session_service.create_session(
-            app_name="InMemoryRunner",
-            user_id="local-user",
-            session_id="local-session",
-        )
-    )
-    input_text="The new iPhone 14 Pro comes with a powerful A16 Bionic chip, 6GB of RAM, and storage options ranging from 128GB to 1TB. It features a Super Retina XDR display, Face ID, and runs on iOS 16."
-    message=types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=input_text)]
-    )
-    for event in agent_runner.run(
-        user_id="local-user",
-        session_id="local-session",
-        new_message=message,
+if __name__=="__main__":
+    topic="sanatan Dharma"
+    asyncio.run(run_parallel(topic))
 
-    ): 
-        print(event)
+
