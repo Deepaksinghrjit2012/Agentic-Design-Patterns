@@ -63,7 +63,7 @@ async def run_parallel(topic:str)->None:
     print(responce)
 
 if __name__=="__main__":
-    topic="Word War"
+    topic="Indian History"
     asyncio.run(run_parallel(topic))
 
 
